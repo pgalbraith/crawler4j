@@ -259,6 +259,11 @@ public class CrawlConfig {
 
     private boolean haltOnError = false;
 
+    /*
+     * number of pages to fetch/process from the database in a single read
+     */
+    private int batchReadSize = 50;
+
     /**
      * Validates the configs specified by this instance.
      *
@@ -706,6 +711,19 @@ public class CrawlConfig {
         this.allowSingleLevelDomain = allowSingleLevelDomain;
     }
 
+    /**
+     * Number of pages to fetch/process from the database in a single read transaction.
+     *
+     * @return the batch read size
+     */
+    public int getBatchReadSize() {
+        return batchReadSize;
+    }
+
+    public void setBatchReadSize(int batchReadSize) {
+        this.batchReadSize = batchReadSize;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
@@ -733,6 +751,7 @@ public class CrawlConfig {
         sb.append("Respect nofollow: " + isRespectNoFollow() + "\n");
         sb.append("Respect noindex: " + isRespectNoIndex() + "\n");
         sb.append("Allow single level domain:" + isAllowSingleLevelDomain() + "\n");
+        sb.append("Batch read size: " + getBatchReadSize() + "\n");
         return sb.toString();
     }
 }
