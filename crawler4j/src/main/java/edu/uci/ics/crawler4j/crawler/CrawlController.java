@@ -82,6 +82,7 @@ public class CrawlController<T extends WebCrawler> {
     protected RobotstxtServer robotstxtServer;
     protected Frontier frontier;
     protected DocIDServer docIdServer;
+    protected TLDList tldList;
 
     @Deprecated
     protected final Object waitingLock = new Object();
@@ -91,7 +92,7 @@ public class CrawlController<T extends WebCrawler> {
 
     public CrawlController(CrawlConfig config, PageFetcher pageFetcher,
                            RobotstxtServer robotstxtServer) throws Exception {
-        this(config, pageFetcher, new Parser(config), robotstxtServer);
+        this(config, pageFetcher, null, robotstxtServer);
     }
 
     public CrawlController(CrawlConfig config, PageFetcher pageFetcher, Parser parser,
@@ -121,7 +122,7 @@ public class CrawlController<T extends WebCrawler> {
             }
         }
 
-        TLDList.setUseOnline(config.isOnlineTldListUpdate());
+        tldList = new TLDList(config);
         URLCanonicalizer.setHaltOnError(config.isHaltOnError());
 
         boolean resumable = config.isResumableCrawling();
@@ -153,7 +154,7 @@ public class CrawlController<T extends WebCrawler> {
         frontier = new Frontier(env, config, sync);
 
         this.pageFetcher = pageFetcher;
-        this.parser = parser;
+        this.parser = parser == null ? new Parser(config, tldList) : parser;
         this.robotstxtServer = robotstxtServer;
 
         finished = false;
@@ -379,6 +380,7 @@ public class CrawlController<T extends WebCrawler> {
             }
 
             WebURL webUrl = new WebURL();
+            webUrl.setTldList(tldList);
             webUrl.setURL(canonicalUrl);
             webUrl.setDocid(docId);
             webUrl.setDepth((short) 0);
@@ -547,6 +549,10 @@ public class CrawlController<T extends WebCrawler> {
 
     public CrawlSynchronizer getCrawlSynchronizer() {
         return sync;
+    }
+
+    public TLDList getTldList() {
+        return tldList;
     }
 
 }
