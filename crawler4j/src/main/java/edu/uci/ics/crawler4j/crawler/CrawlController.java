@@ -92,11 +92,16 @@ public class CrawlController<T extends WebCrawler> {
 
     public CrawlController(CrawlConfig config, PageFetcher pageFetcher,
                            RobotstxtServer robotstxtServer) throws Exception {
-        this(config, pageFetcher, null, robotstxtServer);
+        this(config, pageFetcher, null, robotstxtServer, null);
+    }
+
+    public CrawlController(CrawlConfig config, PageFetcher pageFetcher,
+            RobotstxtServer robotstxtServer, TLDList tldList) throws Exception {
+        this(config, pageFetcher, null, robotstxtServer, tldList);
     }
 
     public CrawlController(CrawlConfig config, PageFetcher pageFetcher, Parser parser,
-                           RobotstxtServer robotstxtServer) throws Exception {
+                           RobotstxtServer robotstxtServer, TLDList tldList) throws Exception {
         // register JVM shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread("Shutdown-" + super.toString()) {
 
@@ -122,7 +127,7 @@ public class CrawlController<T extends WebCrawler> {
             }
         }
 
-        tldList = new TLDList(config);
+        this.tldList = tldList == null ? new TLDList(config) : tldList;
         URLCanonicalizer.setHaltOnError(config.isHaltOnError());
 
         boolean resumable = config.isResumableCrawling();
