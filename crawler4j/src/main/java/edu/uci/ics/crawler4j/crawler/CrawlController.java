@@ -46,13 +46,13 @@ import edu.uci.ics.crawler4j.util.IO;
  *
  * @author Yasser Ganjisaffar
  */
-public class CrawlController<T extends WebCrawler> {
+public class CrawlController {
 
     static final Logger logger = LoggerFactory.getLogger(CrawlController.class);
     private final CrawlConfig config;
     private final CrawlSynchronizer sync;
     private final List<Thread> threads = new ArrayList<>();
-    private final List<T> crawlers = new ArrayList<>();
+    private final List<WebCrawler> crawlers = new ArrayList<>();
 
     /**
      * The 'customData' object can be used for passing custom crawl-related
@@ -203,8 +203,9 @@ public class CrawlController<T extends WebCrawler> {
      * @param numberOfCrawlers
      *            the number of concurrent threads that will be contributing in
      *            this crawling session.
+     * @param <T> Your class extending WebCrawler
      */
-    public void start(Class<T> clazz, int numberOfCrawlers) {
+    public <T extends WebCrawler> void start(Class<T> clazz, int numberOfCrawlers) {
         this.start(new DefaultWebCrawlerFactory<>(clazz), numberOfCrawlers, true);
     }
 
@@ -216,8 +217,9 @@ public class CrawlController<T extends WebCrawler> {
      * @param numberOfCrawlers
      *            the number of concurrent threads that will be contributing in
      *            this crawling session.
+     * @param <T> Your class extending WebCrawler
      */
-    public void start(WebCrawlerFactory<T> crawlerFactory,
+    public <T extends WebCrawler> void start(WebCrawlerFactory<T> crawlerFactory,
                                              int numberOfCrawlers) {
         this.start(crawlerFactory, numberOfCrawlers, true);
     }
@@ -230,8 +232,9 @@ public class CrawlController<T extends WebCrawler> {
      * @param numberOfCrawlers
      *            the number of concurrent threads that will be contributing in
      *            this crawling session.
+     * @param <T> Your class extending WebCrawler
      */
-    public void startNonBlocking(WebCrawlerFactory<T> crawlerFactory,
+    public <T extends WebCrawler> void startNonBlocking(WebCrawlerFactory<T> crawlerFactory,
                                                         final int numberOfCrawlers) {
         this.start(crawlerFactory, numberOfCrawlers, false);
     }
@@ -245,12 +248,13 @@ public class CrawlController<T extends WebCrawler> {
      * @param numberOfCrawlers
      *            the number of concurrent threads that will be contributing in
      *            this crawling session.
+     * @param <T> Your class extending WebCrawler
      */
-    public void startNonBlocking(Class<T> clazz, int numberOfCrawlers) {
+    public <T extends WebCrawler> void startNonBlocking(Class<T> clazz, int numberOfCrawlers) {
         start(new DefaultWebCrawlerFactory<>(clazz), numberOfCrawlers, false);
     }
 
-    protected void start(final WebCrawlerFactory<T> crawlerFactory,
+    protected <T extends WebCrawler> void start(final WebCrawlerFactory<T> crawlerFactory,
                                                 final int numberOfCrawlers, boolean isBlocking) {
         try {
             finished = false;
