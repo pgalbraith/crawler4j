@@ -584,6 +584,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>${maven.enforcer.version}</version>
                     <executions>
                         <execution>
                             <id>enforce-banned-dependencies</id>
