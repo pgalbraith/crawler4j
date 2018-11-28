@@ -231,16 +231,7 @@ public class CrawlConfig {
 
     private boolean allowSingleLevelDomain = false;
 
-    /**
-     * Should all crawling stop if an unexpected error occurs? Default is
-     * {@code false}.
-     *
-     * @param haltOnError
-     *            {@code true} if all crawling should be halted
-     */
-    public void setHaltOnError(boolean haltOnError) {
-        this.haltOnError = haltOnError;
-    }
+    private boolean haltOnError = false;
 
     /*
      * This really doesn't belong here (it should be in CrawlController), but keep
@@ -249,19 +240,6 @@ public class CrawlConfig {
      * way.
      */
     private final CrawlSynchronizer sync = new CrawlSynchronizer(this);
-
-    public CrawlSynchronizer getCrawlSynchronizer() {
-        return sync;
-    }
-
-    /**
-     * Indicates if all crawling will stop if an unexpected error occurs.
-     */
-    public boolean isHaltOnError() {
-        return haltOnError;
-    }
-
-    private boolean haltOnError = false;
 
     /*
      * number of pages to fetch/process from the database in a single read
@@ -743,6 +721,28 @@ public class CrawlConfig {
     }
 
     /**
+     * Indicates if all crawling will stop if an unexpected error occurs.
+     */
+    public boolean isHaltOnError() {
+        return haltOnError;
+    }
+
+    /**
+     * Should all crawling stop if an unexpected error occurs? Default is
+     * {@code false}.
+     *
+     * @param haltOnError
+     *            {@code true} if all crawling should be halted
+     */
+    public void setHaltOnError(boolean haltOnError) {
+        this.haltOnError = haltOnError;
+    }
+
+    public CrawlSynchronizer getCrawlSynchronizer() {
+        return sync;
+    }
+
+    /**
      * Number of pages to fetch/process from the database in a single read transaction.
      *
      * @return the batch read size
@@ -782,6 +782,7 @@ public class CrawlConfig {
         sb.append("Respect nofollow: " + isRespectNoFollow() + "\n");
         sb.append("Respect noindex: " + isRespectNoIndex() + "\n");
         sb.append("Allow single level domain:" + isAllowSingleLevelDomain() + "\n");
+        sb.append("Halt on error: " + isHaltOnError() + "\n");
         sb.append("Batch read size: " + getBatchReadSize() + "\n");
         return sb.toString();
     }
