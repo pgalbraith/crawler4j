@@ -540,7 +540,6 @@ public class CrawlController {
                 frontier.finish();
                 frontier.close();
                 docIdServer.close();
-                pageFetcher.shutDown();
                 env.close();
                 waitingLock.notifyAll();
                 finished = true;
