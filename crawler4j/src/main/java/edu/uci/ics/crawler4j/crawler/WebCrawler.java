@@ -63,8 +63,6 @@ public class WebCrawler implements Runnable {
      */
     protected CrawlController myController;
 
-    private CrawlSynchronizer sync;
-
     /**
      * The thread within which this crawler instance is running.
      */
@@ -122,7 +120,6 @@ public class WebCrawler implements Runnable {
     public void init(int id, CrawlController crawlController)
         throws InstantiationException, IllegalAccessException {
         this.myId = id;
-        this.sync = crawlController.getCrawlSynchronizer();
         this.pageFetcher = crawlController.getPageFetcher();
         this.robotstxtServer = crawlController.getRobotstxtServer();
         this.docIdServer = crawlController.getDocIdServer();
@@ -131,6 +128,7 @@ public class WebCrawler implements Runnable {
         this.myController = crawlController;
         this.isWaitingForNewURLs = false;
         this.batchReadSize = crawlController.getConfig().getBatchReadSize();
+        myController.registerCrawler(this);
     }
 
     /**
@@ -309,7 +307,6 @@ public class WebCrawler implements Runnable {
         try {
             onStart();
             setError(null);
-            sync.registerCrawler();
             boolean finished = false;
             while (!finished) {
                 try {
@@ -320,9 +317,9 @@ public class WebCrawler implements Runnable {
                     frontier.getNextURLs(batchReadSize, assignedURLs);
                     if (assignedURLs.isEmpty()) {
                         isWaitingForNewURLs = true;
-                        sync.awaitCompletion();
+                        myController.awaitCompletion(this);
                         isWaitingForNewURLs = false;
-                        if (sync.isFinished()) {
+                        if (myController.isFinished()) {
                             finished = true;
                             break;
                         }
@@ -346,6 +343,8 @@ public class WebCrawler implements Runnable {
             }
         } catch (Throwable t) {
             setError(t);
+        } finally {
+            myController.unregisterCrawler(this);
         }
         onBeforeExit();
         myController.getCrawlersLocalData().add(getMyLocalData());

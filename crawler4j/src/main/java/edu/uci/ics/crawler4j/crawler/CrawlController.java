@@ -21,7 +21,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -50,7 +52,7 @@ public class CrawlController {
 
     static final Logger logger = LoggerFactory.getLogger(CrawlController.class);
     private final CrawlConfig config;
-    private final CrawlSynchronizer sync;
+    private final Set<WebCrawler> workers = new HashSet<>();
     private final List<Thread> threads = new ArrayList<>();
     private final List<WebCrawler> crawlers = new ArrayList<>();
 
@@ -70,6 +72,7 @@ public class CrawlController {
      * Is the crawling of this session finished?
      */
     protected boolean finished;
+    protected boolean closed;
     private Throwable error;
 
     /**
@@ -84,8 +87,6 @@ public class CrawlController {
     protected DocIDServer docIdServer;
     protected TLDList tldList;
 
-    @Deprecated
-    protected final Object waitingLock = new Object();
     protected final Environment env;
 
     protected Parser parser;
@@ -104,7 +105,6 @@ public class CrawlController {
                            RobotstxtServer robotstxtServer, TLDList tldList) throws Exception {
         config.validate();
         this.config = config;
-        sync = config.getCrawlSynchronizer();
 
         File folder = new File(config.getCrawlStorageFolder());
         if (!folder.exists()) {
@@ -146,13 +146,14 @@ public class CrawlController {
 
         env = new Environment(envHome, envConfig);
         docIdServer = new DocIDServer(env, config);
-        frontier = new Frontier(env, config, sync);
+        frontier = new Frontier(env, config, this);
 
         this.pageFetcher = pageFetcher;
         this.parser = parser == null ? new Parser(config, tldList) : parser;
         this.robotstxtServer = robotstxtServer;
 
         finished = false;
+        closed = false;
         shuttingDown = false;
 
         robotstxtServer.setCrawlConfig(config);
@@ -499,7 +500,7 @@ public class CrawlController {
     /**
      * Set the current crawling session set to 'shutdown'.
      */
-    public synchronized void shutdown() {
+    public void shutdown() {
         shutdown(true);
     }
 
@@ -508,42 +509,43 @@ public class CrawlController {
      * interrupted if the interrupt flag is true, otherwise we will wait for them to
      * complete normally.
      */
-    private synchronized void shutdown(boolean interrupt) {
-        if (!shuttingDown) {
-            synchronized (waitingLock) {
-                if (interrupt) {
-                    logger.info("Shutting down immediately...");
-                } else {
-                    logger.info("waiting for crawl to finish...");
-                }
-                this.shuttingDown = true;
+    private void shutdown(boolean interrupt) {
+        if (interrupt) {
+            logger.info("Shutting down immediately...");
+        } else {
+            logger.info("waiting for crawl to finish...");
+        }
+        this.shuttingDown = true;
 
-                if (!interrupt && Thread.interrupted()) {
+        if (!interrupt && Thread.interrupted()) {
+            interrupt = true;
+        }
+
+        for (Thread t : threads) {
+            while (t.isAlive()) {
+                try {
+                    if (interrupt && !t.isInterrupted()) {
+                        t.interrupt();
+                    }
+
+                    t.join();
+                } catch (InterruptedException e) {
                     interrupt = true;
                 }
-
-                for (Thread t : threads) {
-                    while (t.isAlive()) {
-                        try {
-                            if (interrupt && !t.isInterrupted()) {
-                                t.interrupt();
-                            }
-
-                            t.join();
-                        } catch (InterruptedException e) {
-                            interrupt = true;
-                        }
-                    }
-                }
-
-                pageFetcher.shutDown();
-                frontier.finish();
-                frontier.close();
-                docIdServer.close();
-                env.close();
-                waitingLock.notifyAll();
-                finished = true;
             }
+        }
+    }
+
+    /**
+     * Close all crawling resources (e.g. database, files, connections).
+     */
+    public synchronized void close() {
+        if (!closed) {
+            pageFetcher.shutDown();
+            frontier.close();
+            docIdServer.close();
+            env.close();
+            closed = true;
         }
     }
 
@@ -559,8 +561,73 @@ public class CrawlController {
         this.error = e;
     }
 
-    public CrawlSynchronizer getCrawlSynchronizer() {
-        return sync;
+    /**
+     * <p>
+     * Wait for an undefined amount of time and then return for one of
+     * these reasons:
+     * <ol>
+     * <li>all work is finished
+     * <li>there is more work ready to be done
+     * <li>no reason at all (i.e. spurious wakeup or wait timeout)
+     * </ol>
+     * <p>
+     * Callers must test conditions after wakeup to see what the real situation is.
+     *
+     * @return {@code true} if all crawling is completed, or {@code false} if there
+     *         is still more work to do
+     * @throws InterruptedException
+     */
+    public synchronized boolean awaitCompletion(WebCrawler crawler) throws InterruptedException {
+        assert !finished;
+
+        unregisterCrawler(crawler);
+
+        if (!finished) {
+            wait(60000);
+            registerCrawler(crawler);
+        }
+
+        return finished;
+    }
+
+    /**
+     * All crawler threads should call this method whenever they discover new pages
+     * for processing. This helps to inform other threads that there is more work to
+     * do. Be sure to call this only <em>after</em> new pages are safely committed
+     * to the data store.
+     */
+    public synchronized void foundMorePages() {
+        assert !finished;
+
+        notifyAll();
+    }
+
+    /**
+     * All crawler threads should call this method to register themselves, as soon
+     * as they begin working.
+     */
+    public synchronized void registerCrawler(WebCrawler crawler) {
+        logger.debug("registering worker [" + crawler + "]");
+        workers.add(crawler);
+    }
+
+    /**
+     * When a crawler is completed processing it should call this method to
+     * unregister itself as an actively working crawler.
+     */
+    public synchronized void unregisterCrawler(WebCrawler crawler) {
+        logger.debug("unregistering worker [" + crawler + "]");
+        if (workers.remove(crawler) && !finished && workers.isEmpty()) {
+            // the last crawler is finished, so all crawling is finished
+            logger.info("all crawling is finished");
+            if (config.isShutdownOnEmptyQueue()) {
+                finished = true;
+                notifyAll();
+                close();
+            } else {
+                logger.info("not stopping crawlers because CrawlConfig.shutdownOnEmptyQueue is configured false");
+            }
+        }
     }
 
     public TLDList getTldList() {

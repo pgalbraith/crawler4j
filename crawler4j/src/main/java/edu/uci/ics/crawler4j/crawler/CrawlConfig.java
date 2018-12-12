@@ -234,14 +234,6 @@ public class CrawlConfig {
     private boolean haltOnError = false;
 
     /*
-     * This really doesn't belong here (it should be in CrawlController), but keep
-     * it here for the time being because it's better for backwards compatibility:
-     * things like Frontier don't need the synchronizer provided separately this
-     * way.
-     */
-    private final CrawlSynchronizer sync = new CrawlSynchronizer(this);
-
-    /*
      * number of pages to fetch/process from the database in a single read
      */
     private int batchReadSize = 50;
@@ -736,10 +728,6 @@ public class CrawlConfig {
      */
     public void setHaltOnError(boolean haltOnError) {
         this.haltOnError = haltOnError;
-    }
-
-    public CrawlSynchronizer getCrawlSynchronizer() {
-        return sync;
     }
 
     /**
