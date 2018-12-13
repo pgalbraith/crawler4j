@@ -17,8 +17,6 @@ import edu.uci.ics.crawler4j.url.WebURL;
 /**
  * Created by Avi Hayun on 9/22/2014.
  * Net related Utils
- *
- * @author Paul Galbraith <paul.d.galbraith@gmail.com>
  */
 public class Net {
 
