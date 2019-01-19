@@ -53,6 +53,7 @@ public class CrawlController {
     private final CrawlConfig config;
     private final Set<WebCrawler> workers = new HashSet<>();
     private final List<WebCrawler> crawlers = new ArrayList<>();
+    private final Set<WebCrawler> activeCrawlers = new HashSet();
 
     /**
      * The 'customData' object can be used for passing custom crawl-related
@@ -376,35 +377,43 @@ public class CrawlController {
         if (canonicalUrl == null) {
             logger.error("Invalid seed URL: {}", pageUrl);
         } else {
-            if (docId < 0) {
-                docId = frontier.getDocId(canonicalUrl);
-                if (docId > 0) {
-                    logger.trace("This URL is already seen.");
-                    return;
-                }
-                docId = frontier.getNewDocID(canonicalUrl);
-            } else {
-                try {
-                    frontier.addUrlAndDocId(canonicalUrl, docId);
-                } catch (RuntimeException e) {
-                    if (config.isHaltOnError()) {
-                        throw e;
-                    } else {
-                        logger.error("Could not add seed: {}", e.getMessage());
+            try {
+                frontier.beginTransaction();
+                if (docId < 0) {
+                    docId = frontier.getDocId(canonicalUrl);
+                    if (docId > 0) {
+                        logger.trace("This URL is already seen.");
+                        return;
+                    }
+                    docId = frontier.getNewDocID(canonicalUrl);
+                } else {
+                    try {
+                        frontier.addUrlAndDocId(canonicalUrl, docId);
+                    } catch (RuntimeException e) {
+                        if (config.isHaltOnError()) {
+                            throw e;
+                        } else {
+                            logger.error("Could not add seed: {}", e.getMessage());
+                        }
                     }
                 }
-            }
 
-            WebURL webUrl = new WebURL();
-            webUrl.setTldList(tldList);
-            webUrl.setURL(canonicalUrl);
-            webUrl.setDocid(docId);
-            webUrl.setDepth((short) 0);
-            if (robotstxtServer.allows(webUrl)) {
-                frontier.schedule(webUrl);
-            } else {
-                // using the WARN level here, as the user specifically asked to add this seed
-                logger.warn("Robots.txt does not allow this seed: {}", pageUrl);
+                WebURL webUrl = new WebURL();
+                webUrl.setTldList(tldList);
+                webUrl.setURL(canonicalUrl);
+                webUrl.setDocid(docId);
+                webUrl.setDepth((short) 0);
+                if (robotstxtServer.allows(webUrl)) {
+                    frontier.schedule(webUrl);
+                } else {
+                    // using the WARN level here, as the user specifically asked to add this seed
+                    logger.warn("Robots.txt does not allow this seed: {}", pageUrl);
+                }
+
+                frontier.commit();
+            } catch (IOException | InterruptedException | RuntimeException e) {
+                frontier.rollback();
+                throw e;
             }
         }
     }
@@ -432,8 +441,11 @@ public class CrawlController {
             logger.error("Invalid Url: {} (can't cannonicalize it!)", url);
         } else {
             try {
+                frontier.beginTransaction();
                 frontier.addUrlAndDocId(canonicalUrl, docId);
+                frontier.commit();
             } catch (RuntimeException e) {
+                frontier.rollback();
                 if (config.isHaltOnError()) {
                     throw e;
                 } else {
@@ -548,11 +560,14 @@ public class CrawlController {
             throws FrontierException, InterruptedException {
         assert !finished;
 
-        unregisterCrawler(crawler);
+        workers.remove(crawler);
 
-        if (!finished) {
-            wait(60000);
-            registerCrawler(crawler);
+        if (workers.isEmpty()) {
+            finished = true;
+            notifyAll();
+        } else {
+            wait(600000);
+            workers.add(crawler);
         }
 
         return finished;
@@ -577,6 +592,7 @@ public class CrawlController {
     public synchronized void registerCrawler(WebCrawler crawler) {
         logger.debug("registering worker [" + crawler + "]");
         workers.add(crawler);
+        activeCrawlers.add(crawler);
     }
 
     /**
@@ -585,12 +601,11 @@ public class CrawlController {
      */
     public synchronized void unregisterCrawler(WebCrawler crawler) throws FrontierException {
         logger.debug("unregistering worker [" + crawler + "]");
-        if (workers.remove(crawler) && !finished && workers.isEmpty()) {
+        workers.remove(crawler);
+        if (activeCrawlers.remove(crawler) && activeCrawlers.isEmpty()) {
             // the last crawler is finished, so all crawling is finished
             logger.info("all crawling is finished");
             if (config.isShutdownOnEmptyQueue()) {
-                finished = true;
-                notifyAll();
                 close();
             } else {
                 logger.info("not stopping crawlers because CrawlConfig.shutdownOnEmptyQueue is configured false");

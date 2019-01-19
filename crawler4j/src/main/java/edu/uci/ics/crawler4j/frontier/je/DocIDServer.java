@@ -26,7 +26,6 @@ import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseConfig;
 import com.sleepycat.je.DatabaseEntry;
 import com.sleepycat.je.DatabaseException;
-import com.sleepycat.je.Environment;
 import com.sleepycat.je.OperationStatus;
 
 import edu.uci.ics.crawler4j.crawler.CrawlConfig;
@@ -47,20 +46,21 @@ public class DocIDServer {
     private CrawlConfig config;
     private int lastDocID;
 
-    public DocIDServer(Environment env, CrawlConfig config) {
+    private BerkeleyJeFrontier frontier;
+
+    public DocIDServer(BerkeleyJeFrontier frontier, CrawlConfig config) {
+        this.frontier = frontier;
         this.config = config;
         DatabaseConfig dbConfig = new DatabaseConfig();
         dbConfig.setAllowCreate(true);
-        dbConfig.setTransactional(config.isResumableCrawling());
-        dbConfig.setDeferredWrite(!config.isResumableCrawling());
+        dbConfig.setTransactional(true);
+        dbConfig.setDeferredWrite(false);
         lastDocID = 0;
-        docIDsDB = env.openDatabase(null, DATABASE_NAME, dbConfig);
-        if (config.isResumableCrawling()) {
-            int docCount = getDocCount();
-            if (docCount > 0) {
-                logger.info("Loaded {} URLs that had been detected in previous crawl.", docCount);
-                lastDocID = docCount;
-            }
+        docIDsDB = frontier.env.openDatabase(null, DATABASE_NAME, dbConfig);
+        int docCount = getDocCount();
+        if (docCount > 0) {
+            logger.info("Loaded {} URLs that had been detected in previous crawl.", docCount);
+            lastDocID = docCount;
         }
     }
 
@@ -76,7 +76,7 @@ public class DocIDServer {
             DatabaseEntry value = new DatabaseEntry();
             try {
                 DatabaseEntry key = new DatabaseEntry(url.getBytes());
-                result = docIDsDB.get(null, key, value, null);
+                result = docIDsDB.get(frontier.getTransaction(), key, value, null);
 
             } catch (RuntimeException e) {
                 if (config.isHaltOnError()) {
@@ -105,7 +105,7 @@ public class DocIDServer {
                 }
 
                 ++lastDocID;
-                docIDsDB.put(null, new DatabaseEntry(url.getBytes()),
+                docIDsDB.put(frontier.getTransaction(), new DatabaseEntry(url.getBytes()),
                              new DatabaseEntry(Util.int2ByteArray(lastDocID)));
                 return lastDocID;
             } catch (RuntimeException e) {
@@ -135,7 +135,7 @@ public class DocIDServer {
                 throw new IllegalArgumentException("Doc id: " + prevDocid + " is already assigned to URL: " + url);
             }
 
-            docIDsDB.put(null, new DatabaseEntry(url.getBytes()),
+            docIDsDB.put(frontier.getTransaction(), new DatabaseEntry(url.getBytes()),
                          new DatabaseEntry(Util.int2ByteArray(docId)));
             lastDocID = docId;
         }
