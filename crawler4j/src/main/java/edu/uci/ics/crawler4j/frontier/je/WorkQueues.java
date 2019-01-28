@@ -21,12 +21,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.sleepycat.je.Cursor;
 import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseConfig;
 import com.sleepycat.je.DatabaseEntry;
 import com.sleepycat.je.Environment;
 import com.sleepycat.je.OperationStatus;
+import com.sleepycat.je.ThreadInterruptedException;
 import com.sleepycat.je.Transaction;
 
 import edu.uci.ics.crawler4j.url.WebURL;
@@ -36,6 +40,8 @@ import edu.uci.ics.crawler4j.util.Util;
  * @author Yasser Ganjisaffar
  */
 public class WorkQueues {
+    private final Logger logger = LoggerFactory.getLogger(WorkQueues.class);
+
     private final Database urlsDB;
     private final Environment env;
 
@@ -142,7 +148,13 @@ public class WorkQueues {
     }
 
     public void close() {
-        urlsDB.close();
+        try {
+            urlsDB.close();
+        } catch (ThreadInterruptedException e) {
+            // ignore
+        } catch (Throwable t) {
+            logger.error("error while closing", t);
+        }
     }
 
     /**

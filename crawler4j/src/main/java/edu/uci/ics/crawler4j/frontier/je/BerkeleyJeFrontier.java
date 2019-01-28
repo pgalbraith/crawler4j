@@ -128,8 +128,12 @@ public class BerkeleyJeFrontier implements Frontier {
                 scheduledPages = 0;
             }
         } catch (DatabaseException e) {
-            logger.error("Error while initializing the Frontier", e);
-            workQueues = null;
+            if (config.isHaltOnError()) {
+                throw e;
+            } else {
+                logger.error("Error while initializing the Frontier", e);
+                workQueues = null;
+            }
         }
     }
 
@@ -148,7 +152,11 @@ public class BerkeleyJeFrontier implements Frontier {
                     workQueues.put(url);
                     newScheduledPage++;
                 } catch (DatabaseException e) {
-                    logger.error("Error while putting the url in the work queue", e);
+                    if (config.isHaltOnError()) {
+                        throw e;
+                    } else {
+                        logger.error("Error while putting the url in the work queue", e);
+                    }
                 }
             }
             if (newScheduledPage > 0) {
@@ -170,7 +178,11 @@ public class BerkeleyJeFrontier implements Frontier {
                     counters.increment(Counters.ReservedCounterNames.SCHEDULED_PAGES);
                 }
             } catch (DatabaseException e) {
-                logger.error("Error while putting the url in the work queue", e);
+                if (config.isHaltOnError()) {
+                    throw e;
+                } else {
+                    logger.error("Error while putting the url in the work queue", e);
+                }
             }
         }
         controller.foundMorePages();
@@ -188,7 +200,11 @@ public class BerkeleyJeFrontier implements Frontier {
             }
             result.addAll(curResults);
         } catch (DatabaseException e) {
-            logger.error("Error while getting next urls", e);
+            if (config.isHaltOnError()) {
+                throw e;
+            } else {
+                logger.error("Error while getting next urls", e);
+            }
         }
     }
 
