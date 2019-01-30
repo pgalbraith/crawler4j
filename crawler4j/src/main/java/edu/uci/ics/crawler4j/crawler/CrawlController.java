@@ -68,6 +68,7 @@ public class CrawlController {
     protected boolean finished;
     protected boolean closed;
     private Throwable error;
+    private boolean halt = false;
 
     /**
      * Is the crawling session set to 'shutdown'. Crawler threads monitor this
@@ -115,6 +116,7 @@ public class CrawlController {
         finished = false;
         closed = false;
         shuttingDown = false;
+        halt = false;
 
         robotstxtServer.setCrawlConfig(config);
     }
@@ -239,6 +241,7 @@ public class CrawlController {
 
             @Override
             public void run() {
+                CrawlController.this.interrupt();
                 shutdown();
             }
 
@@ -478,15 +481,15 @@ public class CrawlController {
      * interrupted if the interrupt flag is true, otherwise we will wait for them to
      * complete normally.
      */
-    private void shutdown(boolean interrupt) {
-        if (interrupt) {
-            logger.info("Shutting down immediately...");
+    private void shutdown(boolean halt) {
+        if (halt) {
+            logger.info("halting crawl processing...");
         } else {
             logger.info("waiting for crawl to finish...");
         }
 
-        if (interrupt) {
-            interrupt();
+        if (halt) {
+            this.halt = true;
         }
 
         for (Thread t : threads) {
@@ -514,7 +517,7 @@ public class CrawlController {
     }
 
     public void interrupt() {
-        shuttingDown = true;
+        halt = true;
         for (Thread t : threads) {
             if (t.isAlive() && !t.isInterrupted()) {
                 t.interrupt();
@@ -630,6 +633,14 @@ public class CrawlController {
     public void reset() {
         logger.info("clearing all previous crawl data");
         frontier.reset();
+    }
+
+    public boolean isHalt() {
+        return halt;
+    }
+
+    public void setHalt(boolean halt) {
+        this.halt = halt;
     }
 
 }
