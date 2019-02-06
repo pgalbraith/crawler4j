@@ -28,8 +28,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import edu.uci.ics.crawler4j.fetcher.PageFetcher;
-import edu.uci.ics.crawler4j.frontier.DatabaseException;
 import edu.uci.ics.crawler4j.frontier.Frontier;
+import edu.uci.ics.crawler4j.frontier.FrontierException;
 import edu.uci.ics.crawler4j.frontier.je.BerkeleyJeFrontier;
 import edu.uci.ics.crawler4j.parser.Parser;
 import edu.uci.ics.crawler4j.robotstxt.RobotstxtServer;
@@ -321,7 +321,7 @@ public class CrawlController {
      * @throws InterruptedException
      * @throws IOException
      */
-    public void addSeed(String pageUrl) throws DatabaseException, IOException, InterruptedException {
+    public void addSeed(String pageUrl) throws FrontierException, IOException, InterruptedException {
         addSeed(pageUrl, -1);
     }
 
@@ -346,7 +346,7 @@ public class CrawlController {
      * @throws InterruptedException
      * @throws IOException
      */
-    public void addSeed(String pageUrl, int docId) throws DatabaseException, IOException, InterruptedException {
+    public void addSeed(String pageUrl, int docId) throws FrontierException, IOException, InterruptedException {
         String canonicalUrl = URLCanonicalizer.getCanonicalURL(pageUrl);
         if (canonicalUrl == null) {
             logger.error("Invalid seed URL: {}", pageUrl);
@@ -401,7 +401,7 @@ public class CrawlController {
      * @throws UnsupportedEncodingException
      *
      */
-    public void addSeenUrl(String url, int docId) throws DatabaseException, UnsupportedEncodingException {
+    public void addSeenUrl(String url, int docId) throws FrontierException, UnsupportedEncodingException {
         String canonicalUrl = URLCanonicalizer.getCanonicalURL(url);
         if (canonicalUrl == null) {
             logger.error("Invalid Url: {} (can't cannonicalize it!)", url);
@@ -529,7 +529,7 @@ public class CrawlController {
     /**
      * Close all crawling resources (e.g. database, files, connections).
      */
-    public synchronized void close() throws DatabaseException {
+    public synchronized void close() throws FrontierException {
         if (!closed) {
             pageFetcher.shutDown();
             frontier.close();
@@ -567,7 +567,7 @@ public class CrawlController {
      *         is still more work to do
      * @throws InterruptedException
      */
-    public synchronized boolean awaitCompletion(WebCrawler crawler) throws DatabaseException, InterruptedException {
+    public synchronized boolean awaitCompletion(WebCrawler crawler) throws FrontierException, InterruptedException {
         assert !finished;
 
         unregisterCrawler(crawler);
@@ -605,7 +605,7 @@ public class CrawlController {
      * When a crawler is completed processing it should call this method to
      * unregister itself as an actively working crawler.
      */
-    public synchronized void unregisterCrawler(WebCrawler crawler) throws DatabaseException {
+    public synchronized void unregisterCrawler(WebCrawler crawler) throws FrontierException {
         logger.debug("unregistering worker [" + crawler + "]");
         if (workers.remove(crawler) && !finished && workers.isEmpty()) {
             // the last crawler is finished, so all crawling is finished
@@ -631,7 +631,7 @@ public class CrawlController {
     /**
      * Clear all stored crawl tracking data in preparation for a new crawl.
      */
-    public void reset() throws DatabaseException {
+    public void reset() throws FrontierException {
         logger.info("clearing all previous crawl data");
         frontier.reset();
     }
