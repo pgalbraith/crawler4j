@@ -189,7 +189,7 @@ public class BerkeleyJeFrontier implements Frontier {
     }
 
     @Override
-    public void getNextURLs(int max, List<WebURL> result) throws DatabaseException {
+    public synchronized void getNextURLs(int max, List<WebURL> result) throws DatabaseException {
         try {
             List<WebURL> curResults = workQueues.get(max);
             workQueues.delete(curResults.size());
