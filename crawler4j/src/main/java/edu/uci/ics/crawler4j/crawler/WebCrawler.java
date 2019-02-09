@@ -22,6 +22,7 @@ import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Callable;
 
 import org.apache.http.HttpStatus;
 import org.apache.http.impl.EnglishReasonPhraseCatalog;
@@ -47,7 +48,7 @@ import edu.uci.ics.crawler4j.url.WebURL;
  *
  * @author Yasser Ganjisaffar
  */
-public class WebCrawler implements Runnable {
+public class WebCrawler implements Callable<Void> {
 
     protected static final Logger logger = LoggerFactory.getLogger(WebCrawler.class);
 
@@ -66,6 +67,7 @@ public class WebCrawler implements Runnable {
     /**
      * The thread within which this crawler instance is running.
      */
+    @Deprecated
     private Thread myThread;
 
     /**
@@ -97,8 +99,6 @@ public class WebCrawler implements Runnable {
      */
     @Deprecated
     private boolean isWaitingForNewURLs;
-
-    private Throwable error;
 
     private int batchReadSize;
 
@@ -312,23 +312,23 @@ public class WebCrawler implements Runnable {
     }
 
     @Override
-    public void run() {
+    public Void call() throws Exception {
+        myThread = Thread.currentThread();
         try {
             onStart();
-            setError(null);
             boolean finished = false;
             while (!finished) {
                 if (Thread.interrupted()) {
                     throw new InterruptedException();
                 }
-                if (myController.isHalt()) {
+                if (myController.isShuttingDown()) {
                     finished = true;
                 } else {
                     List<WebURL> assignedURLs = new ArrayList<>(batchReadSize);
                     frontier.getNextURLs(batchReadSize, assignedURLs);
                     if (assignedURLs.isEmpty()) {
                         isWaitingForNewURLs = true;
-                        myController.awaitCompletion(this);
+                        myController.crawlerAwaitingCompletion(this);
                         isWaitingForNewURLs = false;
                         if (myController.isFinished()) {
                             finished = true;
@@ -348,8 +348,8 @@ public class WebCrawler implements Runnable {
                 }
             }
         } catch (Throwable t) {
-            setError(t);
-            myController.setHalt(true);
+            myController.shutdown();
+            throw t;
         } finally {
             try {
                 myController.unregisterCrawler(this);
@@ -359,6 +359,7 @@ public class WebCrawler implements Runnable {
         }
         onBeforeExit();
         myController.getCrawlersLocalData().add(getMyLocalData());
+        return null;
     }
 
     /**
@@ -595,25 +596,18 @@ public class WebCrawler implements Runnable {
         }
     }
 
+    @Deprecated
     public Thread getThread() {
         return myThread;
     }
 
+    @Deprecated
     public void setThread(Thread myThread) {
         this.myThread = myThread;
     }
 
-    @Deprecated
     public boolean isNotWaitingForNewURLs() {
         return !isWaitingForNewURLs;
     }
 
-    protected Throwable getError() {
-        return error;
-    }
-
-    protected void setError(Throwable error) {
-        this.error = error;
-        myController.setError(error);
-    }
 }

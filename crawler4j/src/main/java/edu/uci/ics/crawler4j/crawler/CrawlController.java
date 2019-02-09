@@ -23,6 +23,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +52,6 @@ public class CrawlController {
     static final Logger logger = LoggerFactory.getLogger(CrawlController.class);
     private final CrawlConfig config;
     private final Set<WebCrawler> workers = new HashSet<>();
-    private final List<Thread> threads = new ArrayList<>();
     private final List<WebCrawler> crawlers = new ArrayList<>();
 
     /**
@@ -68,8 +71,6 @@ public class CrawlController {
      */
     protected boolean finished;
     protected boolean closed;
-    private Throwable error;
-    private boolean halt = false;
 
     /**
      * Is the crawling session set to 'shutdown'. Crawler threads monitor this
@@ -83,6 +84,9 @@ public class CrawlController {
     protected TLDList tldList;
 
     protected Parser parser;
+
+    private ExecutorService executor;
+    private List<Future<Void>> futures;
 
     public CrawlController(CrawlConfig config, PageFetcher pageFetcher,
                            RobotstxtServer robotstxtServer) throws Exception {
@@ -117,7 +121,6 @@ public class CrawlController {
         finished = false;
         closed = false;
         shuttingDown = false;
-        halt = false;
 
         robotstxtServer.setCrawlConfig(config);
     }
@@ -250,17 +253,17 @@ public class CrawlController {
 
         try {
             finished = false;
-            setError(null);
+            shuttingDown = false;
             crawlersLocalData.clear();
+
+            executor = Executors.newFixedThreadPool(numberOfCrawlers);
+            futures = new ArrayList<>();
 
             for (int i = 1; i <= numberOfCrawlers; i++) {
                 T crawler = crawlerFactory.newInstance();
-                Thread thread = new Thread(crawler, "Crawler " + i);
-                crawler.setThread(thread);
                 crawler.init(i, this);
-                thread.start();
                 crawlers.add(crawler);
-                threads.add(thread);
+                futures.add(executor.submit(crawler));
                 logger.info("Crawler {} started", i);
             }
 
@@ -268,11 +271,9 @@ public class CrawlController {
                 waitUntilFinish();
             }
 
-        } catch (Throwable e) {
+        } catch (Exception e) {
             if (config.isHaltOnError()) {
-                if (e instanceof Error) {
-                    throw (Error) e;
-                } else if (e instanceof RuntimeException) {
+                if (e instanceof RuntimeException) {
                     throw (RuntimeException)e;
                 } else {
                     throw new RuntimeException("error starting crawler(s)", e);
@@ -287,7 +288,32 @@ public class CrawlController {
      * Wait until this crawling session finishes.
      */
     public void waitUntilFinish() {
-        shutdown(false);
+        if (!executor.isShutdown()) {
+            executor.shutdown();
+        }
+
+        if (Thread.interrupted()) {
+            logger.error("previously interrupted");
+            interrupt();
+        }
+
+        while (!executor.isTerminated()) {
+            try {
+                logger.info("waiting for crawl to finish...");
+                executor.awaitTermination(1, TimeUnit.DAYS);
+            } catch (InterruptedException e) {
+                logger.warn("interrupted");
+                interrupt();
+            }
+        }
+
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     /**
@@ -342,7 +368,6 @@ public class CrawlController {
      *            the URL of the seed
      * @param docId
      *            the document id that you want to be assigned to this seed URL.
-     * @throws InterruptedException
      * @throws InterruptedException
      * @throws IOException
      */
@@ -465,65 +490,29 @@ public class CrawlController {
         return this.finished;
     }
 
-    @Deprecated
     public boolean isShuttingDown() {
         return shuttingDown;
     }
 
     /**
-     * Set the current crawling session set to 'shutdown'.
+     * Set the current crawling session set to 'shutdown'. Crawler threads
+     * monitor the shutdown flag and when it is set to true, they will no longer
+     * process new pages.
      */
     public void shutdown() {
-        shutdown(true);
+        logger.info("Shutting down...");
+        this.shuttingDown = true;
     }
 
     /**
-     * Set the current crawling session set to 'shutdown'. Crawler threads will be
-     * interrupted if the interrupt flag is true, otherwise we will wait for them to
-     * complete normally.
+     * Set the current crawling session set to 'shutdown' but additionally interrupt
+     * all running crawlers (as opposed to waiting for them to complete their current
+     * unit of work cleanly).
      */
-    private void shutdown(boolean halt) {
-        if (halt) {
-            logger.info("halting crawl processing...");
-        } else {
-            logger.info("waiting for crawl to finish...");
-        }
-
-        if (halt) {
-            this.halt = true;
-        }
-
-        for (Thread t : threads) {
-            while (t.isAlive()) {
-                try {
-                    t.join();
-                } catch (InterruptedException e) {
-                    // ignore
-                }
-            }
-        }
-
-        if (config.isHaltOnError()) {
-            Throwable t = getError();
-            if (t != null && config.isHaltOnError()) {
-                if (t instanceof RuntimeException) {
-                    throw (RuntimeException)t;
-                } else if (t instanceof Error) {
-                    throw (Error)t;
-                } else {
-                    throw new RuntimeException("terminating because of exception:", t);
-                }
-            }
-        }
-    }
-
     public void interrupt() {
-        halt = true;
-        for (Thread t : threads) {
-            if (t.isAlive() && !t.isInterrupted()) {
-                t.interrupt();
-            }
-        }
+        logger.warn("interrupting...");
+        shutdown();
+        executor.shutdownNow();
     }
 
     /**
@@ -531,8 +520,8 @@ public class CrawlController {
      */
     public synchronized void close() throws FrontierException {
         if (!closed) {
-            pageFetcher.shutDown();
             frontier.close();
+            pageFetcher.shutDown();
             closed = true;
         }
     }
@@ -541,33 +530,22 @@ public class CrawlController {
         return config;
     }
 
-    protected synchronized Throwable getError() {
-        return error;
-    }
-
-    protected synchronized void setError(Throwable e) {
-        if (e == null || this.error == null) {
-            this.error = e;
-        }
-    }
-
     /**
      * <p>
-     * Wait for an undefined amount of time and then return for one of
-     * these reasons:
-     * <ol>
-     * <li>all work is finished
-     * <li>there is more work ready to be done
-     * <li>no reason at all (i.e. spurious wakeup or wait timeout)
-     * </ol>
+     * Indicates that the specified {@Link WebCrawler} has done all it's assigned work
+     * and needs to know if there is more work ready to be assigned, or if the entire
+     * crawl process is complete.  Note that in the case of a spurious wakeup, a @{code false}
+     * value will be returned, so the caller should always verify that there really is
+     * more work to do.
      * <p>
      * Callers must test conditions after wakeup to see what the real situation is.
      *
-     * @return {@code true} if all crawling is completed, or {@code false} if there
-     *         is still more work to do
+     * @return {@code true} if all crawling is completed  / {@code false} if there
+     *         is still more work to be assigned
      * @throws InterruptedException
      */
-    public synchronized boolean awaitCompletion(WebCrawler crawler) throws FrontierException, InterruptedException {
+    public synchronized boolean crawlerAwaitingCompletion(WebCrawler crawler)
+            throws FrontierException, InterruptedException {
         assert !finished;
 
         unregisterCrawler(crawler);
@@ -634,14 +612,6 @@ public class CrawlController {
     public void reset() throws FrontierException {
         logger.info("clearing all previous crawl data");
         frontier.reset();
-    }
-
-    public boolean isHalt() {
-        return halt;
-    }
-
-    public void setHalt(boolean halt) {
-        this.halt = halt;
     }
 
 }

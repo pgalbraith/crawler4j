@@ -30,7 +30,6 @@ import com.sleepycat.je.DatabaseConfig;
 import com.sleepycat.je.DatabaseEntry;
 import com.sleepycat.je.Environment;
 import com.sleepycat.je.OperationStatus;
-import com.sleepycat.je.ThreadInterruptedException;
 import com.sleepycat.je.Transaction;
 
 import edu.uci.ics.crawler4j.url.WebURL;
@@ -148,13 +147,7 @@ public class WorkQueues {
     }
 
     public void close() {
-        try {
-            urlsDB.close();
-        } catch (ThreadInterruptedException e) {
-            // ignore
-        } catch (Throwable t) {
-            logger.error("error while closing", t);
-        }
+        urlsDB.close();
     }
 
     /**
