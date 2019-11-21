@@ -4,6 +4,7 @@ build
 
 # IntelliJ IDEA
 **/*.iml
+.idea/
 
 # Eclipse
 .classpath
@@ -11,3 +12,8 @@ build
 .settings/
 bin/
 target/
+
+
+.checkstyle
+
+.groovy/
