@@ -217,7 +217,7 @@ public class CrawlConfig {
     private CookieStore cookieStore;
 
     /**
-     * DNS resolver to use, #{@link SystemDefaultDnsResolver()} is default.
+     * DNS resolver to use, {@link SystemDefaultDnsResolver} is default.
      */
     public void setDnsResolver(final DnsResolver dnsResolver) {
         this.dnsResolver = dnsResolver;
@@ -265,10 +265,10 @@ public class CrawlConfig {
     }
 
     /**
-     * The folder which will be used by crawler for storing the intermediate
-     * crawl data. The content of this folder should not be modified manually.
-     *
-     * @param crawlStorageFolder The folder for the crawler's storage
+     * Sets the folder which will be used by crawler for storing the
+     * intermediate crawl data (e.g. list of urls that are extracted
+     * from previously fetched pages and need to be crawled later).
+     * Content of this folder should not be modified manually.
      */
     public void setCrawlStorageFolder(String crawlStorageFolder) {
         this.crawlStorageFolder = crawlStorageFolder;
@@ -712,8 +712,6 @@ public class CrawlConfig {
 
     /**
      * Are single level domains (e.g. http://localhost) considered valid?
-     *
-     * @return
      */
     public boolean isAllowSingleLevelDomain() {
         return allowSingleLevelDomain;
