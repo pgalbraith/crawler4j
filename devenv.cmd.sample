@@ -1,0 +1,5 @@
+@REM Specify JDK
+SET JAVA_HOME=C:\Program Files\Java\jdk1.8.0_231
+
+@REM Specify Docker machine details
+@FOR /f "tokens=*" %%i IN ('docker-machine env default') DO @%%i
