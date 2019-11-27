@@ -28,7 +28,7 @@ import com.sleepycat.je.Cursor;
 import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseConfig;
 import com.sleepycat.je.DatabaseEntry;
-import com.sleepycat.je.Environment;
+import com.sleepycat.je.LockMode;
 import com.sleepycat.je.OperationStatus;
 import com.sleepycat.je.Transaction;
 
@@ -42,33 +42,19 @@ public class WorkQueues {
     private final Logger logger = LoggerFactory.getLogger(WorkQueues.class);
 
     private final Database urlsDB;
-    private final Environment env;
-
-    private final boolean resumable;
 
     private final WebURLTupleBinding webURLBinding;
 
-    protected final Object mutex = new Object();
+    private final BerkeleyJeFrontier frontier;
 
-    public WorkQueues(Environment env, String dbName, boolean resumable) {
-        this.env = env;
-        this.resumable = resumable;
+    public WorkQueues(BerkeleyJeFrontier frontier, String dbName) {
+        this.frontier = frontier;
         DatabaseConfig dbConfig = new DatabaseConfig();
         dbConfig.setAllowCreate(true);
-        dbConfig.setTransactional(resumable);
-        dbConfig.setDeferredWrite(!resumable);
-        urlsDB = env.openDatabase(null, dbName, dbConfig);
+        dbConfig.setTransactional(true);
+        dbConfig.setDeferredWrite(false);
+        urlsDB = frontier.env.openDatabase(null, dbName, dbConfig);
         webURLBinding = new WebURLTupleBinding();
-    }
-
-    protected Transaction beginTransaction() {
-        return resumable ? env.beginTransaction(null, null) : null;
-    }
-
-    protected static void commit(Transaction tnx) {
-        if (tnx != null) {
-            tnx.commit();
-        }
     }
 
     protected Cursor openCursor(Transaction txn) {
@@ -76,43 +62,22 @@ public class WorkQueues {
     }
 
     public List<WebURL> get(int max) {
-        synchronized (mutex) {
-            List<WebURL> results = new ArrayList<>(max);
-            DatabaseEntry key = new DatabaseEntry();
-            DatabaseEntry value = new DatabaseEntry();
-            Transaction txn = beginTransaction();
-            try (Cursor cursor = openCursor(txn)) {
-                OperationStatus result = cursor.getFirst(key, value, null);
-                int matches = 0;
-                while ((matches < max) && (result == OperationStatus.SUCCESS)) {
-                    if (value.getData().length > 0) {
-                        results.add(webURLBinding.entryToObject(value));
-                        matches++;
-                    }
-                    result = cursor.getNext(key, value, null);
-                }
-            }
-            commit(txn);
-            return results;
-        }
-    }
-
-    public void delete(int count) {
-        synchronized (mutex) {
-            DatabaseEntry key = new DatabaseEntry();
-            DatabaseEntry value = new DatabaseEntry();
-            Transaction txn = beginTransaction();
-            try (Cursor cursor = openCursor(txn)) {
-                OperationStatus result = cursor.getFirst(key, value, null);
-                int matches = 0;
-                while ((matches < count) && (result == OperationStatus.SUCCESS)) {
-                    cursor.delete();
+        List<WebURL> results = new ArrayList<>(max);
+        DatabaseEntry key = new DatabaseEntry();
+        DatabaseEntry value = new DatabaseEntry();
+        try (Cursor cursor = openCursor(frontier.getTransaction())) {
+            OperationStatus result = cursor.getFirst(key, value, LockMode.RMW);
+            int matches = 0;
+            while ((matches < max) && (result == OperationStatus.SUCCESS)) {
+                if (value.getData().length > 0) {
+                    results.add(webURLBinding.entryToObject(value));
                     matches++;
-                    result = cursor.getNext(key, value, null);
                 }
+                cursor.delete();
+                result = cursor.getNext(key, value, LockMode.RMW);
             }
-            commit(txn);
         }
+        return results;
     }
 
     /*
@@ -137,9 +102,7 @@ public class WorkQueues {
     public void put(WebURL url) {
         DatabaseEntry value = new DatabaseEntry();
         webURLBinding.objectToEntry(url, value);
-        Transaction txn = beginTransaction();
-        urlsDB.put(txn, getDatabaseEntryKey(url), value);
-        commit(txn);
+        urlsDB.put(frontier.getTransaction(), getDatabaseEntryKey(url), value);
     }
 
     public long getLength() {

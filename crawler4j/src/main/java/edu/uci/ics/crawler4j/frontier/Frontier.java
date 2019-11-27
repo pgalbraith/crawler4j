@@ -32,7 +32,18 @@ public interface Frontier {
      */
     void addUrlAndDocId(String url, int docId) throws FrontierException;
 
+    /**
+     * Begin a new transaction. Should be followed up with {@link #commit()} or
+     * {@link #reset()} to end the transaction.
+     */
+    void beginTransaction() throws FrontierException;
+
     void close() throws FrontierException;
+
+    /**
+     * Commit all IO and end the current transaction.
+     */
+    void commit() throws FrontierException;
 
     /**
      * Returns the docid of an already seen url.
@@ -65,6 +76,11 @@ public interface Frontier {
      * Clear all stored crawl tracking data in preparation for a new crawl.
      */
     void reset() throws FrontierException;
+
+    /**
+     * Rollback all IO and end the transaction.
+     */
+    void rollback() throws FrontierException;
 
     /**
      * @param url

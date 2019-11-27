@@ -49,12 +49,9 @@ public class BerkeleyJeFrontier implements Frontier {
     protected static final Logger logger = LoggerFactory.getLogger(BerkeleyJeFrontier.class);
 
     private static final String DATABASE_NAME = "PendingURLsDB";
-    private static final int IN_PROCESS_RESCHEDULE_BATCH_SIZE = 100;
     private final CrawlConfig config;
     private final CrawlController controller;
     protected WorkQueues workQueues;
-
-    protected InProcessPagesDB inProcessPages;
 
     protected final Object mutex = new Object();
 
@@ -62,11 +59,13 @@ public class BerkeleyJeFrontier implements Frontier {
 
     protected Counters counters;
 
-    private Environment env;
+    Environment env;
 
     private DocIDServer docIdServer;
 
     private File envHome;
+
+    ThreadLocal<Transaction> transactionHolder = new ThreadLocal<>();
 
     private EnvironmentConfig envConfig;
 
@@ -82,13 +81,11 @@ public class BerkeleyJeFrontier implements Frontier {
             }
         }
 
-        boolean resumable = config.isResumableCrawling();
-
         envConfig = new EnvironmentConfig();
         envConfig.setAllowCreate(true);
-        envConfig.setTransactional(resumable);
-        envConfig.setLocking(resumable);
-        envConfig.setLockTimeout(config.getDbLockTimeout(), TimeUnit.MILLISECONDS);
+        envConfig.setTransactional(true);
+        envConfig.setLocking(true);
+        envConfig.setLockTimeout(0, TimeUnit.MILLISECONDS);
 
         envHome = new File(config.getCrawlStorageFolder() + "/frontier");
         if (!envHome.exists()) {
@@ -101,40 +98,16 @@ public class BerkeleyJeFrontier implements Frontier {
         }
 
         env = new Environment(envHome, envConfig);
-        docIdServer = new DocIDServer(env, config);
+        docIdServer = new DocIDServer(this, config);
 
         this.config = config;
         this.controller = controller;
-        this.counters = new Counters(env, config);
-        try {
-            workQueues = new WorkQueues(env, DATABASE_NAME, config.isResumableCrawling());
-            if (config.isResumableCrawling()) {
-                scheduledPages = counters.getValue(Counters.ReservedCounterNames.SCHEDULED_PAGES);
-                inProcessPages = new InProcessPagesDB(env);
-                long numPreviouslyInProcessPages = inProcessPages.getLength();
-                if (numPreviouslyInProcessPages > 0) {
-                    logger.info("Rescheduling {} URLs from previous crawl.",
-                                numPreviouslyInProcessPages);
-                    scheduledPages -= numPreviouslyInProcessPages;
-
-                    List<WebURL> urls = inProcessPages.get(IN_PROCESS_RESCHEDULE_BATCH_SIZE);
-                    while (!urls.isEmpty()) {
-                        scheduleAll(urls);
-                        inProcessPages.delete(urls.size());
-                        urls = inProcessPages.get(IN_PROCESS_RESCHEDULE_BATCH_SIZE);
-                    }
-                }
-            } else {
-                inProcessPages = null;
-                scheduledPages = 0;
-            }
-        } catch (DatabaseException e) {
-            if (config.isHaltOnError()) {
-                throw new FrontierException("Error while initializing the Frontier", e);
-            } else {
-                logger.error("Error while initializing the Frontier", e);
-                workQueues = null;
-            }
+        this.counters = new Counters(this, config);
+        workQueues = new WorkQueues(this, DATABASE_NAME);
+        if (config.isResumableCrawling()) {
+            scheduledPages = counters.getValue(Counters.ReservedCounterNames.SCHEDULED_PAGES);
+        } else {
+            scheduledPages = 0;
         }
     }
 
@@ -193,12 +166,6 @@ public class BerkeleyJeFrontier implements Frontier {
     public synchronized void getNextURLs(int max, List<WebURL> result) throws FrontierException {
         try {
             List<WebURL> curResults = workQueues.get(max);
-            workQueues.delete(curResults.size());
-            if (inProcessPages != null) {
-                for (WebURL curPage : curResults) {
-                    inProcessPages.put(curPage);
-                }
-            }
             result.addAll(curResults);
         } catch (DatabaseException e) {
             if (config.isHaltOnError()) {
@@ -212,23 +179,10 @@ public class BerkeleyJeFrontier implements Frontier {
     @Override
     public void setProcessed(WebURL webURL) {
         counters.increment(Counters.ReservedCounterNames.PROCESSED_PAGES);
-        if (inProcessPages != null) {
-            if (!inProcessPages.removeURL(webURL)) {
-                logger.warn("Could not remove: {} from list of processed pages.", webURL.getURL());
-            }
-        }
     }
 
     public long getQueueLength() {
         return workQueues.getLength();
-    }
-
-    public long getNumberOfAssignedPages() {
-        if (inProcessPages != null) {
-            return inProcessPages.getLength();
-        } else {
-            return 0;
-        }
     }
 
     public long getNumberOfProcessedPages() {
@@ -244,9 +198,6 @@ public class BerkeleyJeFrontier implements Frontier {
         try {
             workQueues.close();
             counters.close();
-            if (inProcessPages != null) {
-                inProcessPages.close();
-            }
             docIdServer.close();
             env.close();
         } catch (DatabaseException e) {
@@ -262,9 +213,6 @@ public class BerkeleyJeFrontier implements Frontier {
         try {
             workQueues.process(clearDb);
             counters.process(clearDb);
-            if (inProcessPages != null) {
-                inProcessPages.process(clearDb);
-            }
             docIdServer.process(clearDb);
             scheduledPages = 0;
         } catch (DatabaseException e) {
@@ -326,6 +274,40 @@ public class BerkeleyJeFrontier implements Frontier {
     @Override
     public boolean isSeenBefore(String url) {
         return docIdServer.isSeenBefore(url);
+    }
+
+    /**
+     * @return transaction bound to the current thread
+     */
+    public Transaction getTransaction() {
+        return transactionHolder.get();
+    }
+
+    /* (non-Javadoc)
+     * @see edu.uci.ics.crawler4j.frontier.Frontier#beginTransaction()
+     */
+    @Override
+    public void beginTransaction() {
+        assert getTransaction() == null;
+        transactionHolder.set(env.beginTransaction(null, null));
+    }
+
+    /* (non-Javadoc)
+     * @see edu.uci.ics.crawler4j.frontier.Frontier#commit()
+     */
+    @Override
+    public void commit() {
+        getTransaction().commit();
+        transactionHolder.set(null);
+    }
+
+    /* (non-Javadoc)
+     * @see edu.uci.ics.crawler4j.frontier.Frontier#rollback()
+     */
+    @Override
+    public void rollback() {
+        getTransaction().abort();
+        transactionHolder.set(null);
     }
 
 }

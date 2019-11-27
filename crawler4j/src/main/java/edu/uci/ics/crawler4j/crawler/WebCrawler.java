@@ -324,32 +324,42 @@ public class WebCrawler implements Callable<Void> {
                 if (myController.isShuttingDown()) {
                     finished = true;
                 } else {
-                    List<WebURL> assignedURLs = new ArrayList<>(batchReadSize);
-                    frontier.getNextURLs(batchReadSize, assignedURLs);
-                    if (assignedURLs.isEmpty()) {
-                        isWaitingForNewURLs = true;
-                        myController.crawlerAwaitingCompletion(this);
-                        isWaitingForNewURLs = false;
-                        if (myController.isFinished()) {
-                            finished = true;
+                    boolean success = false;
+                    try {
+                        frontier.beginTransaction();
+                        List<WebURL> assignedURLs = new ArrayList<>(batchReadSize);
+                        frontier.getNextURLs(batchReadSize, assignedURLs);
+                        if (assignedURLs.isEmpty()) {
+                            isWaitingForNewURLs = true;
+                            myController.crawlerAwaitingCompletion(this);
+                            isWaitingForNewURLs = false;
+                            if (myController.isFinished()) {
+                                finished = true;
+                            }
+                        } else {
+                            for (WebURL curURL : assignedURLs) {
+                                if (Thread.interrupted()) {
+                                    throw new InterruptedException();
+                                }
+                                if (curURL != null) {
+                                    curURL = handleUrlBeforeProcess(curURL);
+                                    processPage(curURL);
+                                    frontier.setProcessed(curURL);
+                                }
+                            }
                         }
-                    } else {
-                        for (WebURL curURL : assignedURLs) {
-                            if (Thread.interrupted()) {
-                                throw new InterruptedException();
-                            }
-                            if (curURL != null) {
-                                curURL = handleUrlBeforeProcess(curURL);
-                                processPage(curURL);
-                                frontier.setProcessed(curURL);
-                            }
+                        frontier.commit();
+                        success = true;
+                    } finally {
+                        if (!success) {
+                            frontier.rollback();
                         }
                     }
                 }
             }
-        } catch (Throwable t) {
+        } catch (Exception e) {
             myController.shutdown();
-            throw t;
+            throw e;
         } finally {
             try {
                 myController.unregisterCrawler(this);
