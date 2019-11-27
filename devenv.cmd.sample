@@ -1,5 +1,9 @@
-@REM Specify JDK
+@REM JDK location
 SET JAVA_HOME=C:\Program Files\Java\jdk1.8.0_231
 
-@REM Specify Docker machine details
+@REM Docker location
+SET DOCKER_LOCATION=C:\Program Files\Docker Toolbox\docker.exe
+SET DOCKER_COMPOSE_LOCATION=C:\Program Files\Docker Toolbox\docker-compose.exe
+
+@REM Docker machine
 @FOR /f "tokens=*" %%i IN ('docker-machine env default') DO @%%i
